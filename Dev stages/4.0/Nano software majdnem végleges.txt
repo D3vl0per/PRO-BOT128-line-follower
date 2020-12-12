@@ -1,0 +1,178 @@
+//Created by Mark Zsibok
+//My mentors:
+
+#include <EEPROM.h>
+#define m_right  6       //motor jobb                 !!csak pwm!!
+#define m_left  3        //motor bal                  !!csak pwm!!
+#define m_enable  4      //motor kapcsló                 
+#define analogLeft A0    //analog érzékelõ 
+#define analogRight A1   //analog érzékelõ
+#define led_12 12        //elsõ balra led
+#define led_13 8         //elsõ jobbra led
+#define led_14 11        //hátsó jobbra led
+#define led_15 15        //hátsó balra led
+#define buzzer 5         //Buzzer
+#define button_res 2     //reset button
+#define button_boot 9    //boot button
+
+//////////////////////////////////////////////////////
+const int EEPROM_SEP = 250;                         //EEPROM memória cím #1
+const int EEPROM_SEM = 255;                         //EEPROM memória cím #2
+const int max_speed = 255;                          //Motor maximális operációs sebessége 
+const int min_speed = 189;                          //Motor minimális operációs sebessége
+const int allowedDiffSpeed = max_speed-min_speed;   //Megengedett differencál sebesség
+boolean bLastLeftTurned = true;                     //Led vezérlés
+const float sensorDiffThreshold = 6.0;              //Sensor mérés küszöb
+float sensor_right = 0.0;                           //Sensor beolvasott adatok #1
+float sensor_left = 0.0;                            //Sensor beolvasott adatok #2
+float sensor_diff_scale = 2.5;                      //
+float sensor_error_multiply = 0.0;                  //Offset hiba mértéke #1
+float sensor_error_plus = 0.0;                      //Offset hiba mértéke #2
+float black_right = 0.0; //x1                       //
+float white_right = 0.0; //x2                       //
+float black_left = 0.0;  //y1                       //
+float white_left = 0.0;  //y2                       //
+int x = 0;                                          //
+/////////////////////////////////////////////////////
+
+void setup() {
+  //setup
+  pinMode(m_right, OUTPUT);
+  pinMode(m_left, OUTPUT);
+  pinMode(m_enable, OUTPUT);
+  pinMode(led_12, OUTPUT);
+  pinMode(led_13, OUTPUT);
+  pinMode(button_res, INPUT_PULLUP);
+  pinMode(button_boot, INPUT_PULLUP);
+  
+  
+  //debug
+  Serial.begin(9200);
+  //debug
+
+
+
+  while (x == 1) {
+    while (digitalRead(button_res) == HIGH && digitalRead(button_boot) == HIGH);
+    if (digitalRead(button_res) == HIGH) {
+      delay(1000);
+      Serial.println("Uj adat mentese... ");
+      Serial.println("Data black:");
+      black_right = analogRead(analogRight);
+      black_left = analogRead(analogLeft);
+      while (digitalRead(button_res) == HIGH);
+      Serial.println("Data white");
+      white_right = analogRead(analogRight);
+      white_left = analogRead(analogLeft);
+      sensor_error_plus = (((black_right * white_left) - (black_left * white_right)) / (black_right - white_right));
+      sensor_error_multiply = ((black_left - sensor_error_plus) / (black_right));
+      delay(100);
+      
+      EEPROM.put(EEPROM_SEP, sensor_error_plus);
+       delay(100);
+      EEPROM.put(EEPROM_SEM, sensor_error_multiply);
+      x = 1;
+      Serial.println("Data write succefull...");
+    }
+
+    if (digitalRead(button_boot) == HIGH) {
+      delay(1000);
+      Serial.println("Regi adatok visszaallitasa... ");
+      EEPROM.get(EEPROM_SEP, sensor_error_plus);
+      EEPROM.get(EEPROM_SEM, sensor_error_multiply);
+      x = 1;
+      Serial.println("Data write succefull...");
+    }
+  }
+  
+  Serial.print("black_right: ");
+  Serial.println(black_right);
+  Serial.print("black_left: ");
+  Serial.println(black_left);
+  Serial.print("white_right: ");
+  Serial.println(white_right);
+  Serial.print("white_left: ");
+  Serial.println(white_left);
+  Serial.print("sensor_error_plus: ");
+  Serial.println(sensor_error_plus);
+  Serial.print("sensor_error_multiply: ");
+  Serial.println(sensor_error_multiply);
+  
+  ////////////////////////////////////////
+  
+  Serial.print("original_plus: ");
+  Serial.println(sensor_error_plus);
+  Serial.print("original_multiply: ");
+  Serial.println(sensor_error_multiply);
+  delay(1000);
+  EEPROM.get(EEPROM_SEP, sensor_error_plus);
+  EEPROM.get(EEPROM_SEM, sensor_error_multiply);
+  delay(1000);
+  Serial.print("EEPROM_plus: ");
+  Serial.println(sensor_error_plus);
+  Serial.print("EEPROM_multiply: ");
+  Serial.println(sensor_error_multiply);
+  delay(100000);
+  ////////////////////////////////////////
+  
+  delay(500);
+  ////////////////////////////////////////
+  
+
+
+  
+  while (digitalRead(button_boot) == HIGH);
+  tone(buzzer, 1200);
+  delay(100);
+  noTone(buzzer);
+  delay(100);
+  tone(buzzer, 1200);
+  delay(100);
+  noTone(buzzer);
+  digitalWrite(m_enable, HIGH);
+}
+
+
+void setDiffSpeeds(int diffSpeed) {
+  //Saturation
+  if (diffSpeed >    allowedDiffSpeed) diffSpeed =  allowedDiffSpeed;
+  if (diffSpeed < -1*allowedDiffSpeed) diffSpeed = -1*allowedDiffSpeed;
+  //Saturation
+  float base_speed=min_speed;
+  //Proceeding
+  analogWrite(m_right, base_speed+diffSpeed);
+  analogWrite(m_left , base_speed-diffSpeed);
+  //Proceeding
+}
+
+
+
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+void loop() {
+  //beolvasás
+  sensor_right = analogRead(analogRight);
+  sensor_left = analogRead(analogLeft);
+  
+  //kalibrálás
+  sensor_right = (sensor_right * sensor_error_multiply) + sensor_error_plus;
+  
+  
+  float sensorDiff = (sensor_left - sensor_right);
+   
+  //led vezérlés
+  if (abs(sensorDiff) > sensorDiffThreshold){
+    if (sensorDiff > 0) {
+      bLastLeftTurned = true;
+      digitalWrite(led_12, HIGH);
+      digitalWrite(led_13, LOW);
+    } else {
+      bLastLeftTurned = false;
+      digitalWrite(led_12, LOW);
+      digitalWrite(led_13, HIGH);
+    }
+  } 
+  sensorDiff = sensorDiff*sensor_diff_scale; //Range 0-1023
+  setDiffSpeeds(sensorDiff);				 //függvény meghívás
+}
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
